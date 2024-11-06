@@ -1,0 +1,11 @@
+pandas
+numpy
+matplotlib
+nltk
+community-louvain
+networkx
+wordcloud
+contractions
+googletrans==4.0.0-rc1
+navertrans
+inflect
