@@ -116,3 +116,5 @@ These visualizations were generated using **NetworkX** and **Plotly** libraries,
 
 
 
+poetry run python -m src.run_pipeline --cfg conf/config.yaml
+mlflow ui  # 결과 확인(선택)

@@ -1,0 +1,12 @@
+dataset:
+  paths: "data/reviews/*.csv"    # glob 패턴도 OK
+  text_col: "review"
+  country_col: "country"
+  seed: 42
+
+keyword:
+  window: 2
+  min_df: 10
+
+output_dir: "results"
+mlflow_experiment: "intern_ageism_multilang"
