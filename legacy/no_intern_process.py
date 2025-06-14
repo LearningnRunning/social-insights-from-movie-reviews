@@ -1,8 +1,10 @@
 import os
+import networkx as nx
 
 import pandas as pd
-
-STATIC_PATH = "/home/elinha/NLP/moducon_data/phase_2"
+import itertools
+from collections import defaultdict
+STATIC_PATH = "/home/elinha/NLP/moducon_data/phase_2/raw_file"
 
 china_file_name = "intern_review_china.csv"
 japan_file_name = "intern_review_japan.csv"
@@ -60,10 +62,12 @@ from collections import Counter
 
 import inflect
 import pandas as pd
-from contractions import expand_contractions
 from nltk import pos_tag, word_tokenize
 from nltk.corpus import wordnet as wn
 from nltk.stem import WordNetLemmatizer
+
+
+from contractions import expand_contractions
 
 # 기존의 전처리 함수들을 여기에 정의합니다 (expand_contractions, convert_number, rm_punct, only_english, pos_tagging, remain_specific_tags, singularize_and_lemmatize, remove_verbs, replace_words)
 
@@ -466,10 +470,6 @@ target_dict["orient"]["representative_words"] = [
 
 import random
 
-# Step 1: Extract all unique representative words from all countries
-unique_words = set()
-for country, country_dict in target_dict.items():
-    unique_words.update(country_dict["representative_words"])
 
 
 # Function to generate random colors and ensure they aren't too dark
@@ -483,173 +483,259 @@ def random_color():
             return color
 
 
-word_color_mapping = {}
-for word in unique_words:
-    word_color_mapping[word] = random_color()
-
-import networkx as nx
-
-target_country = "korea"
-modified_sentences_filtered = target_dict[target_country]["modified_sentences"]
-relevant_words = target_dict[target_country]["representative_words"]
-
-H_old_filtered = nx.Graph()
-main_word_connections = {}
-for main_word in relevant_words:
-    # Get all edges connected to the main word
-    connections = []
-    for edge in H_old_filtered.edges(data=True):
-        if main_word in edge[:2]:  # if main_word is either source or target
-            other_word = edge[0] if edge[1] == main_word else edge[1]
-            weight = edge[2]["weight"]
-            connections.append((other_word, weight))
-
-    # Sort connections by weight and get top 5
-    sorted_connections = sorted(connections, key=lambda x: x[1], reverse=True)[:5]
-    main_word_connections[main_word] = sorted_connections
-
-# # Print results
-# for main_word, connections in main_word_connections.items():
-#     print(f"\nMain word: {main_word}")
-#     print("Supporting words (with weights):")
-#     for word, weight in connections:
-#         print(f"  {word}: {weight}")
-
-
-import itertools
+import community as community_louvain
 from collections import defaultdict
 
-import networkx as nx
-import plotly.graph_objs as go
+target_country = "korea"
+#TODO: 반복문으로 
+for target_country in ["korea", "japan", "china", "northAmerica"]:
 
-default_color = target_dict[target_country]["color"]
-# Prepare the co-occurrence data
-co_occurrence = defaultdict(int)
-window_size = 20
+    word_color_mapping = {}
+    # Step 1: Extract all unique representative words from all countries
+    unique_words = set()
+    for country, country_dict in target_dict.items():
+        unique_words.update(country_dict["representative_words"])
 
-for sentence in modified_sentences_filtered:
-    effective_window_size = min(len(sentence), window_size)
-    for i in range(len(sentence)):
-        window = sentence[i : i + effective_window_size]
-        for pair in itertools.combinations(window, 2):
-            co_occurrence[pair] += 1
 
-# Create the graph
-G = nx.MultiGraph()
+    for word in unique_words:
+        word_color_mapping[word] = random_color()
 
-for (word1, word2), weight in co_occurrence.items():
-    G.add_edge(word1, word2, weight=weight)
+    target_dict[target_country]['word_color_mapping'] = word_color_mapping
 
-# 리스트를 평탄화하고 set으로 변환하여 중복 제거
-unique_words = set(word for sublist in modified_sentences_filtered for word in sublist)
 
-# 결과를 리스트로 변환 (필요 시)
-# relevant_words = list(unique_words)
-relevant_words = target_dict[target_country]["representative_words"]
+    co_occurrence = defaultdict(int)
 
-# # Filter edges based on relevance to specific words
-# filtered_edges = [(u, v, d) for u, v, d in G.edges(data=True) if u in relevant_words or v in relevant_words]
+    window_size = 20
 
-# H = nx.Graph()
-# H.add_edges_from(filtered_edges)
+    modified_sentences = target_dict[target_country]["modified_sentences"]
 
-# Focus on top co-occurrences for specific words
-H_old_filtered = nx.Graph()
+    # modified_sentences 리스트에서 'Word' 컬럼에 있는 단어들만 남기기
+    for sentence in modified_sentences:
+        effective_window_size = min(len(sentence), window_size)
+        for i in range(len(sentence)):
+            window = sentence[i:i+effective_window_size]
+            for pair in itertools.combinations(window, 2):
+                co_occurrence[pair] += 1
 
-for word in relevant_words:
-    edges_for_word = [
-        (u, v, d) for u, v, d in G.edges(data=True) if (u == word or v == word)
+    G = nx.Graph()
+    for (word1, word2), weight in co_occurrence.items():
+        G.add_edge(word1, word2, weight=weight)
+
+    partition = community_louvain.best_partition(G, weight='weight')
+    print(set(partition.values()))
+    # print(partition)
+
+    representative_words = target_dict[target_country]['representative_words']
+    save_value_nums= []
+    for word in representative_words:
+        
+        cluster_num = partition.get(word, '')
+        if cluster_num and cluster_num not in save_value_nums:
+            save_value_nums.append(cluster_num)
+        elif cluster_num  in save_value_nums:
+            print(f'{word}는 이미 {cluster_num}에 있는 단어 입니다.')
+        else:
+            print(f'{word}는 없는 단어입니다.')
+            
+    print(f'남은 군집은 {save_value_nums} 입니다.')
+
+    filtered_partition = [key for key, value in partition.items() if value in save_value_nums]
+
+    modified_sentences_filtered = [
+        [word for word in sentence if word in filtered_partition]
+        for sentence in modified_sentences
     ]
-    sorted_edges = sorted(edges_for_word, key=lambda x: x[2]["weight"], reverse=True)[
-        :window_size
-    ]
-    H_old_filtered.add_edges_from(sorted_edges)
-
-# Using plotly to visualize
-pos_old_filtered = nx.spring_layout(
-    H_old_filtered, seed=42, k=1.2
-)  # Spring layout positions
-
-# Create edge traces
-edge_trace = go.Scatter(
-    x=[], y=[], line=dict(width=0.5, color="#807c6a"), hoverinfo="none", mode="lines"
-)
-
-for edge in H_old_filtered.edges():
-    x0, y0 = pos_old_filtered[edge[0]]
-    x1, y1 = pos_old_filtered[edge[1]]
-    edge_trace["x"] += (x0, x1, None)
-    edge_trace["y"] += (y0, y1, None)
 
 
-# Function to generate random colors and ensure they aren't too dark
-def random_color():
-    while True:
-        color = "#{:06x}".format(random.randint(0, 0xFFFFFF))
-        # Calculate brightness: 0.299*R + 0.587*G + 0.114*B
-        r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
-        brightness = 0.299 * r + 0.587 * g + 0.114 * b
-        if brightness > 150:  # Only return the color if it's bright enough
-            return color
+    from collections import Counter
+    all_words = [word for sentence in modified_sentences for word in sentence if len(word) > 1]
+    word_freq= Counter(all_words)
+
+    df_word_freq = pd.DataFrame(word_freq.items(), columns=['Word', 'Frequency'])
+
+    df_word_freq.head(20)
+
+    frequency_mean = df_word_freq['Frequency'].mean()
+    print('frequency_mean', frequency_mean)
+    df_word_freq_new = df_word_freq[df_word_freq['Frequency']>frequency_mean]
+    df_word_freq_new.sort_values(by='Frequency', ascending=False, inplace=True)
 
 
-custom_node_colors = {}
-for word in relevant_words:
-    random_node_color = word_color_mapping.get(word, random_color())
-    custom_node_colors[word] = random_node_color
-
-# Create node traces
-node_trace = go.Scatter(
-    x=[],
-    y=[],
-    text=[],
-    mode="markers+text",
-    hoverinfo="text",
-    marker=dict(
-        showscale=False,  # No color scale as we are using custom colors
-        color=[],  # Custom color will be added here
-        size=[H_old_filtered.degree(node) * 10 for node in H_old_filtered.nodes()],
-    ),
-)
+    words_to_keep = set(df_word_freq_new['Word'])
 
 
-for node in H_old_filtered.nodes():
-    x, y = pos_old_filtered[node]
-    node_trace["x"] += (x,)
-    node_trace["y"] += (y,)
-    node_trace["text"] += (node,)
-    # Apply custom color if available, otherwise default to gray
-    node_trace["marker"]["color"] += (
-        custom_node_colors.get(node, f"#{default_color}"),
-    )  # Default to gray
-
-# Create the figure
-fig = go.Figure(
-    data=[edge_trace, node_trace],
-    layout=go.Layout(
-        # title=f'Co-occurrence Network for china_taiwan (Top {top_num} Edges per Word)',
-        titlefont_size=20,
-        showlegend=False,
-        hovermode="closest",
-        margin=dict(b=0, l=0, r=0, t=40),
-        annotations=[
-            dict(
-                text="Node size based on degree (number of connections)",
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                x=0.005,
-                y=-0.002,
-            )
-        ],
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        width=1000,  # Set the width of the figure (in pixels)
-        height=1000,  # Set the height of the figure (in pixels)
-    ),
-)
+    relevant_words = [
+        word for word in list(words_to_keep)
+        if word in filtered_partition]
+    print(f"평균 이상의 빈도수 중에서 선택된 군집에서 살아남은 단어의 수: {len(relevant_words)}")
+    print('target_country', target_country)
+    df_dict[target_country]['modified_sentences_filtered'] = modified_sentences_filtered
+    df_dict[target_country]['relevant_words'] = relevant_words
 
 
-# Show the interactive graph
-fig.show()
-fig.write_html("test_review_keywords_network.html")
+
+
+for target_country in ["korea", "japan", "china", "northAmerica", "orient"]:
+
+    modified_sentences_filtered = target_dict[target_country]["modified_sentences"]
+    relevant_words = target_dict[target_country]["representative_words"]
+
+    H_old_filtered = nx.Graph()
+    main_word_connections = {}
+    for main_word in relevant_words:
+        # Get all edges connected to the main word
+        connections = []
+        for edge in H_old_filtered.edges(data=True):
+            if main_word in edge[:2]:  # if main_word is either source or target
+                other_word = edge[0] if edge[1] == main_word else edge[1]
+                weight = edge[2]["weight"]
+                connections.append((other_word, weight))
+
+        # Sort connections by weight and get top 5
+        sorted_connections = sorted(connections, key=lambda x: x[1], reverse=True)[:5]
+        main_word_connections[main_word] = sorted_connections
+
+    # # Print results
+    # for main_word, connections in main_word_connections.items():
+    #     print(f"\nMain word: {main_word}")
+    #     print("Supporting words (with weights):")
+    #     for word, weight in connections:
+    #         print(f"  {word}: {weight}")
+
+
+
+
+    import networkx as nx
+    import plotly.graph_objs as go
+
+    default_color = target_dict[target_country]["color"]
+    # Prepare the co-occurrence data
+    co_occurrence = defaultdict(int)
+    window_size = 20
+
+    for sentence in modified_sentences_filtered:
+        effective_window_size = min(len(sentence), window_size)
+        for i in range(len(sentence)):
+            window = sentence[i : i + effective_window_size]
+            for pair in itertools.combinations(window, 2):
+                co_occurrence[pair] += 1
+
+    # Create the graph
+    G = nx.MultiGraph()
+
+    for (word1, word2), weight in co_occurrence.items():
+        G.add_edge(word1, word2, weight=weight)
+
+    # 리스트를 평탄화하고 set으로 변환하여 중복 제거
+    unique_words = set(word for sublist in modified_sentences_filtered for word in sublist)
+
+    # 결과를 리스트로 변환 (필요 시)
+    # relevant_words = list(unique_words)
+    relevant_words = target_dict[target_country]["representative_words"]
+
+    # # Filter edges based on relevance to specific words
+    # filtered_edges = [(u, v, d) for u, v, d in G.edges(data=True) if u in relevant_words or v in relevant_words]
+
+    # H = nx.Graph()
+    # H.add_edges_from(filtered_edges)
+
+    # Focus on top co-occurrences for specific words
+    H_old_filtered = nx.Graph()
+
+    for word in relevant_words:
+        edges_for_word = [
+            (u, v, d) for u, v, d in G.edges(data=True) if (u == word or v == word)
+        ]
+        sorted_edges = sorted(edges_for_word, key=lambda x: x[2]["weight"], reverse=True)[
+            :window_size
+        ]
+        H_old_filtered.add_edges_from(sorted_edges)
+
+    # Using plotly to visualize
+    pos_old_filtered = nx.spring_layout(
+        H_old_filtered, seed=42, k=1.2
+    )  # Spring layout positions
+
+    # Create edge traces
+    edge_trace = go.Scatter(
+        x=[], y=[], line=dict(width=0.5, color="#807c6a"), hoverinfo="none", mode="lines"
+    )
+
+    for edge in H_old_filtered.edges():
+        x0, y0 = pos_old_filtered[edge[0]]
+        x1, y1 = pos_old_filtered[edge[1]]
+        edge_trace["x"] += (x0, x1, None)
+        edge_trace["y"] += (y0, y1, None)
+
+
+    # Function to generate random colors and ensure they aren't too dark
+    def random_color():
+        while True:
+            color = "#{:06x}".format(random.randint(0, 0xFFFFFF))
+            # Calculate brightness: 0.299*R + 0.587*G + 0.114*B
+            r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+            brightness = 0.299 * r + 0.587 * g + 0.114 * b
+            if brightness > 150:  # Only return the color if it's bright enough
+                return color
+
+
+    custom_node_colors = {}
+    for word in relevant_words:
+        random_node_color = word_color_mapping.get(word, random_color())
+        custom_node_colors[word] = random_node_color
+
+    # Create node traces
+    node_trace = go.Scatter(
+        x=[],
+        y=[],
+        text=[],
+        mode="markers+text",
+        hoverinfo="text",
+        marker=dict(
+            showscale=False,  # No color scale as we are using custom colors
+            color=[],  # Custom color will be added here
+            size=[H_old_filtered.degree(node) * 10 for node in H_old_filtered.nodes()],
+        ),
+    )
+
+
+    for node in H_old_filtered.nodes():
+        x, y = pos_old_filtered[node]
+        node_trace["x"] += (x,)
+        node_trace["y"] += (y,)
+        node_trace["text"] += (node,)
+        # Apply custom color if available, otherwise default to gray
+        node_trace["marker"]["color"] += (
+            custom_node_colors.get(node, f"#{default_color}"),
+        )  # Default to gray
+
+    # Create the figure
+    fig = go.Figure(
+        data=[edge_trace, node_trace],
+        layout=go.Layout(
+            # title=f'Co-occurrence Network for china_taiwan (Top {top_num} Edges per Word)',
+            titlefont_size=20,
+            showlegend=False,
+            hovermode="closest",
+            margin=dict(b=0, l=0, r=0, t=40),
+            annotations=[
+                dict(
+                    text="Node size based on degree (number of connections)",
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    x=0.005,
+                    y=-0.002,
+                )
+            ],
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            width=1000,  # Set the width of the figure (in pixels)
+            height=1000,  # Set the height of the figure (in pixels)
+        ),
+    )
+
+
+    # Show the interactive graph
+    # fig.show()
+    fig.write_html(f"{target_country}_review_keywords_network.html")
